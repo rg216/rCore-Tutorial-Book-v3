@@ -1,6 +1,6 @@
 //! batch subsystem
 
-use crate::sbi::shutdown;
+// use crate::sbi::shutdown;
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use core::arch::asm;
@@ -70,7 +70,8 @@ impl AppManager {
     unsafe fn load_app(&self, app_id: usize) {
         if app_id >= self.num_app {
             println!("All applications completed!");
-            shutdown(false);
+            panic!("No app to load!");
+            // shutdown(false);
         }
         println!("[kernel] Loading app_{}", app_id);
         // clear app area
