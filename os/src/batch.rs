@@ -1,9 +1,11 @@
 //! batch subsystem
 
-// use crate::sbi::shutdown;
+use crate::sbi::shutdown;
 use crate::sync::UPSafeCell;
+use crate::syscall::print_syscall_stats;
 use crate::trap::TrapContext;
 use core::arch::asm;
+use core::ops::Sub;
 use lazy_static::*;
 
 const USER_STACK_SIZE: usize = 4096 * 2;
@@ -70,8 +72,9 @@ impl AppManager {
     unsafe fn load_app(&self, app_id: usize) {
         if app_id >= self.num_app {
             println!("All applications completed!");
-            panic!("No app to load!");
-            // shutdown(false);
+            print_syscall_stats();
+            //panic!("No app to load!");
+            shutdown(false);
         }
         println!("[kernel] Loading app_{}", app_id);
         // clear app area
@@ -129,6 +132,15 @@ pub fn init() {
 /// print apps info
 pub fn print_app_info() {
     APP_MANAGER.exclusive_access().print_app_info();
+}
+
+/// get current app's id
+pub fn taskinfo() -> isize {
+    let app_manager = APP_MANAGER.exclusive_access();
+    let current_app = app_manager.get_current_app();
+    drop(app_manager);
+    // since app manager will move to next app before current app kicks in
+    current_app.sub(1) as isize
 }
 
 /// run next app
