@@ -7,6 +7,10 @@ use crate::trap::TrapContext;
 use core::arch::asm;
 use core::ops::Sub;
 use lazy_static::*;
+use riscv::register::time;
+
+/// save app start time
+pub static mut APP_START_TIME: Option<u64> = None;
 
 const USER_STACK_SIZE: usize = 4096 * 2;
 const KERNEL_STACK_SIZE: usize = 4096 * 2;
@@ -145,6 +149,9 @@ pub fn taskinfo() -> isize {
 
 /// run next app
 pub fn run_next_app() -> ! {
+    unsafe {
+        APP_START_TIME = Some(time::read64());
+    }
     let mut app_manager = APP_MANAGER.exclusive_access();
     let current_app = app_manager.get_current_app();
     unsafe {
@@ -164,4 +171,20 @@ pub fn run_next_app() -> ! {
         )) as *const _ as usize);
     }
     panic!("Unreachable in batch::run_current_app!");
+}
+
+/// cal time
+pub fn time_elapse() {
+    unsafe {
+        if let Some(start) = APP_START_TIME {
+            let elapsed: u64;
+            let now = time::read64();
+            if now < start {
+                elapsed = ((u64::MAX - start) + now) / 10000; // 10KHz
+            } else {
+                elapsed = (now - start) / 10001;
+            }
+            println!("[kernel] Application cost {} ms", elapsed);
+        }
+    }
 }
