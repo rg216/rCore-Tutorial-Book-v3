@@ -16,7 +16,7 @@ mod context;
 
 use crate::batch::{run_next_app, time_elapse};
 use crate::syscall::syscall;
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 use riscv::register::{
     mtvec::TrapMode,
     scause::{self, Exception, Trap},
@@ -45,8 +45,24 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
             cx.sepc += 4;
             cx.x[10] = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]) as usize;
         }
-        Trap::Exception(Exception::StoreFault) | Trap::Exception(Exception::StorePageFault) => {
-            println!("[kernel] PageFault in application, kernel killed it.");
+        Trap::Exception(Exception::StoreFault)
+        | Trap::Exception(Exception::StorePageFault)
+        | Trap::Exception(Exception::StoreMisaligned)
+        | Trap::Exception(Exception::InstructionPageFault)
+        | Trap::Exception(Exception::InstructionMisaligned)
+        | Trap::Exception(Exception::LoadFault)
+        | Trap::Exception(Exception::LoadPageFault) => {
+            let fp: usize;
+            unsafe {
+                asm!("mv {}, fp", out(reg) fp,);
+            }
+            println!(
+                "{:?} in application, bad addr = {:#x}, bad instruction = {:#x}",
+                scause.cause(),
+                stval,
+                fp
+            );
+            // println!("[kernel] PageFault in application, kernel killed it.");
             time_elapse();
             run_next_app();
         }
