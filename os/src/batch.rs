@@ -127,3 +127,10 @@ pub fn run_next_app() -> ! {
     }
     panic!("Unreachable in batch::run_current_app!");
 }
+
+///Check sys_write addr. If not legal, return false. Vice versa;
+pub fn sys_write_check(buf: *const u8, len: usize) -> bool {
+    let res = (buf as usize >= APP_BASE_ADDRESS && len <= APP_SIZE_LIMIT)
+        || (buf as usize >= USER_STACK.data.as_ptr() as usize && len <= USER_STACK_SIZE);
+    res
+}
