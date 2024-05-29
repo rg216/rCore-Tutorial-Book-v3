@@ -1,8 +1,22 @@
+//! Trap handling functionality
+//!
+//! For rCore, we have a single trap entry point, namely `__alltraps`. At
+//! initialization in [`init()`], we set the `stvec` CSR to point to it.
+//!
+//! All traps go through `__alltraps`, which is defined in `trap.S`. The
+//! assembly language code does just enough work restore the kernel space
+//! context, ensuring that Rust code safely runs, and transfers control to
+//! [`trap_handler()`].
+//!
+//! It then calls different functionality based on what exactly the exception
+//! was. For example, timer interrupts trigger task preemption, and syscalls go
+//! to [`syscall()`].
+
 mod context;
 
-use crate::batch::run_next_app;
+use crate::batch::{run_next_app, time_elapse};
 use crate::syscall::syscall;
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 use riscv::register::{
     mtvec::TrapMode,
     scause::{self, Exception, Trap},
@@ -11,6 +25,7 @@ use riscv::register::{
 
 global_asm!(include_str!("trap.S"));
 
+/// initialize CSR `stvec` as the entry of `__alltraps`
 pub fn init() {
     extern "C" {
         fn __alltraps();
@@ -21,9 +36,10 @@ pub fn init() {
 }
 
 #[no_mangle]
+/// handle an interrupt, exception, or system call from user space
 pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
-    let scause = scause::read();
-    let stval = stval::read();
+    let scause = scause::read(); // get trap cause
+    let stval = stval::read(); // get extra value
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
             cx.sepc += 4;
@@ -31,13 +47,28 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
         }
         Trap::Exception(Exception::StoreFault)
         | Trap::Exception(Exception::StorePageFault)
-        | Trap::Exception(Exception::InstructionFault)
-        | Trap::Exception(Exception::LoadFault) => {
-            println!("[kernel] {:?} in application, core dumped.", scause.cause());
+        | Trap::Exception(Exception::StoreMisaligned)
+        | Trap::Exception(Exception::InstructionPageFault)
+        | Trap::Exception(Exception::InstructionMisaligned)
+        | Trap::Exception(Exception::LoadFault)
+        | Trap::Exception(Exception::LoadPageFault) => {
+            let fp: usize;
+            unsafe {
+                asm!("mv {}, fp", out(reg) fp,);
+            }
+            println!(
+                "{:?} in application, bad addr = {:#x}, bad instruction = {:#x}",
+                scause.cause(),
+                stval,
+                fp
+            );
+            // println!("[kernel] PageFault in application, kernel killed it.");
+            time_elapse();
             run_next_app();
         }
         Trap::Exception(Exception::IllegalInstruction) => {
-            println!("[kernel] IllegalInstruction in application, core dumped.");
+            println!("[kernel] IllegalInstruction in application, kernel killed it.");
+            time_elapse();
             run_next_app();
         }
         _ => {

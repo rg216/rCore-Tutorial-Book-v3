@@ -1,13 +1,22 @@
+//! batch subsystem
+
+use crate::sbi::shutdown;
 use crate::sync::UPSafeCell;
+use crate::syscall::print_syscall_stats;
 use crate::trap::TrapContext;
 use core::arch::asm;
+use core::ops::Sub;
 use lazy_static::*;
+use riscv::register::time;
 
-pub const USER_STACK_SIZE: usize = 4096 * 2;
-pub const KERNEL_STACK_SIZE: usize = 4096 * 2;
-pub const MAX_APP_NUM: usize = 16;
-pub const APP_BASE_ADDRESS: usize = 0x80400000;
-pub const APP_SIZE_LIMIT: usize = 0x20000;
+/// save app start time
+pub static mut APP_START_TIME: Option<u64> = None;
+
+const USER_STACK_SIZE: usize = 4096 * 2;
+const KERNEL_STACK_SIZE: usize = 4096 * 2;
+const MAX_APP_NUM: usize = 16;
+const APP_BASE_ADDRESS: usize = 0x80400000;
+const APP_SIZE_LIMIT: usize = 0x20000;
 
 #[repr(align(4096))]
 struct KernelStack {
@@ -22,7 +31,7 @@ struct UserStack {
 static KERNEL_STACK: KernelStack = KernelStack {
     data: [0; KERNEL_STACK_SIZE],
 };
-pub static USER_STACK: UserStack = UserStack {
+static USER_STACK: UserStack = UserStack {
     data: [0; USER_STACK_SIZE],
 };
 
@@ -40,7 +49,7 @@ impl KernelStack {
 }
 
 impl UserStack {
-    pub fn get_sp(&self) -> usize {
+    fn get_sp(&self) -> usize {
         self.data.as_ptr() as usize + USER_STACK_SIZE
     }
 }
@@ -66,11 +75,12 @@ impl AppManager {
 
     unsafe fn load_app(&self, app_id: usize) {
         if app_id >= self.num_app {
-            panic!("All applications completed!");
+            println!("All applications completed!");
+            print_syscall_stats();
+            //panic!("No app to load!");
+            shutdown(false);
         }
         println!("[kernel] Loading app_{}", app_id);
-        // clear icache
-        asm!("fence.i");
         // clear app area
         core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, APP_SIZE_LIMIT).fill(0);
         let app_src = core::slice::from_raw_parts(
@@ -79,6 +89,13 @@ impl AppManager {
         );
         let app_dst = core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, app_src.len());
         app_dst.copy_from_slice(app_src);
+        // Memory fence about fetching the instruction memory
+        // It is guaranteed that a subsequent instruction fetch must
+        // observes all previous writes to the instruction memory.
+        // Therefore, fence.i must be executed after we have loaded
+        // the code of the next app into the instruction memory.
+        // See also: riscv non-priv spec chapter 3, 'Zifencei' extension.
+        asm!("fence.i");
     }
 
     pub fn get_current_app(&self) -> usize {
@@ -111,15 +128,30 @@ lazy_static! {
     };
 }
 
+/// init batch subsystem
 pub fn init() {
     print_app_info();
 }
 
+/// print apps info
 pub fn print_app_info() {
     APP_MANAGER.exclusive_access().print_app_info();
 }
 
+/// get current app's id
+pub fn taskinfo() -> isize {
+    let app_manager = APP_MANAGER.exclusive_access();
+    let current_app = app_manager.get_current_app();
+    drop(app_manager);
+    // since app manager will move to next app before current app kicks in
+    current_app.sub(1) as isize
+}
+
+/// run next app
 pub fn run_next_app() -> ! {
+    unsafe {
+        APP_START_TIME = Some(time::read64());
+    }
     let mut app_manager = APP_MANAGER.exclusive_access();
     let current_app = app_manager.get_current_app();
     unsafe {
@@ -141,10 +173,25 @@ pub fn run_next_app() -> ! {
     panic!("Unreachable in batch::run_current_app!");
 }
 
+/// cal time
+pub fn time_elapse() {
+    unsafe {
+        if let Some(start) = APP_START_TIME {
+            let elapsed: u64;
+            let now = time::read64();
+            if now < start {
+                elapsed = ((u64::MAX - start) + now) / 10000; // 10KHz
+            } else {
+                elapsed = (now - start) / 10001;
+            }
+            println!("[kernel] Application cost {} ms", elapsed);
+        }
+    }
+}
+
 ///Check sys_write addr. If not legal, return false. Vice versa;
 pub fn sys_write_check(buf: *const u8, len: usize) -> bool {
     let res = (buf as usize >= APP_BASE_ADDRESS && len <= APP_SIZE_LIMIT)
-        || (buf as usize >= USER_STACK.get_sp() - USER_STACK_SIZE
-            && buf as usize + len <= USER_STACK.get_sp());
+        || (buf as usize >= USER_STACK.data.as_ptr() as usize && len <= USER_STACK_SIZE);
     res
 }
