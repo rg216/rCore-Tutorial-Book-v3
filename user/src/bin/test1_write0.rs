@@ -46,7 +46,7 @@ pub fn main() -> i32 {
         write(STDOUT, unsafe {
             slice::from_raw_parts((bottom - 5) as *const _, 10)
         }),
-        -1
+        10
     );
     // TODO: test string located in .data section
     println!("Test write0 OK!");
