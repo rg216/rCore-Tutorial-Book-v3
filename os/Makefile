@@ -20,7 +20,7 @@ endif
 
 # Run K210
 K210-SERIALPORT	= /dev/ttyUSB0
-K210-BURNER = ../tools/kflash.py
+K210-BURNER = ../tools/kfla`sh.py
 
 # Binutils
 OBJDUMP := rust-objdump --arch-name=riscv64
@@ -31,7 +31,7 @@ DISASM ?= -x
 
 TEST ?= 0
 
-build: env switch-check $(KERNEL_BIN)
+build: env $(KERNEL_BIN)
 
 switch-check:
 ifeq ($(BOARD), qemu)
@@ -70,7 +70,7 @@ disasm-vim: kernel
 
 run: run-inner
 
-	
+
 
 run-inner: build
 ifeq ($(BOARD),qemu)
