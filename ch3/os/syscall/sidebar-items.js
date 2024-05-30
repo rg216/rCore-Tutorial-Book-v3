@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SYSCALL_EXIT","SYSCALL_GET_TIME","SYSCALL_TASKINFO","SYSCALL_WRITE","SYSCALL_YIELD"],"fn":["print_syscall_stats","syscall"],"mod":["fs","process","taskinfo"],"struct":["SYSCALL_STATS"]};
