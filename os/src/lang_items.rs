@@ -1,12 +1,23 @@
+//! The panic handler
+
+use crate::{sbi::shutdown, syscall::print_syscall_stats};
 use core::panic::PanicInfo;
-use crate::sbi::shutdown;
+use log::*;
+use crate::stacktrace::print_stack_trace;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     if let Some(location) = info.location() {
-        println!("[kernel] Panicked at {}:{} {}", location.file(), location.line(), info.message().unwrap());
+        error!(
+            "[kernel] Panicked at {}:{} {}",
+            location.file(),
+            location.line(),
+            info.message().unwrap()
+        );
     } else {
-        println!("[kernel] Panicked: {}", info.message().unwrap());
+        error!("[kernel] Panicked: {}", info.message().unwrap());
     }
-    shutdown()
+    unsafe{print_stack_trace();}
+    print_syscall_stats();
+    shutdown(true)
 }

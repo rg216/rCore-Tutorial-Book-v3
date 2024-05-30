@@ -1,0 +1,10 @@
+diff a/.gitignore b/.gitignore	(rejected hunks)
+@@ -13,4 +13,5 @@ easy-fs/target/*
+ easy-fs-fuse/Cargo.lock
+ easy-fs-fuse/target/*
+ tools/
+-pushall.sh
+\ No newline at end of file
++pushall.sh
++.DS_Store
+\ No newline at end of file

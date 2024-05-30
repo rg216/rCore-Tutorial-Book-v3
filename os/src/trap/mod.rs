@@ -1,3 +1,16 @@
+//! Trap handling functionality
+//!
+//! For rCore, we have a single trap entry point, namely `__alltraps`. At
+//! initialization in [`init()`], we set the `stvec` CSR to point to it.
+//!
+//! All traps go through `__alltraps`, which is defined in `trap.S`. The
+//! assembly language code does just enough work restore the kernel space
+//! context, ensuring that Rust code safely runs, and transfers control to
+//! [`trap_handler()`].
+//!
+//! It then calls different functionality based on what exactly the exception
+//! was. For example, timer interrupts trigger task preemption, and syscalls go
+//! to [`syscall()`].
 mod context;
 
 use riscv::register::{
@@ -18,6 +31,7 @@ use crate::task::{
     suspend_current_and_run_next,
 };
 use crate::timer::set_next_trigger;
+use core::arch::{asm, global_asm};
 
 global_asm!(include_str!("trap.S"));
 
@@ -44,6 +58,23 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
         Trap::Exception(Exception::StoreFault) |
         Trap::Exception(Exception::StorePageFault) => {
             println!("[kernel] PageFault in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.", stval, cx.sepc);
+            exit_current_and_run_next();
+        }
+        Trap::Exception(Exception::StoreMisaligned)
+     | Trap::Exception(Exception::InstructionPageFault)
+     | Trap::Exception(Exception::InstructionMisaligned)
+     | Trap::Exception(Exception::LoadFault)
+     | Trap::Exception(Exception::LoadPageFault) => {
+            let fp: usize;
+            unsafe {
+                asm!("mv {}, fp", out(reg) fp,);
+            }
+            println!(
+                "{:?} in application, bad addr = {:#x}, bad instruction = {:#x}",
+                scause.cause(),
+                stval,
+                fp
+            );
             exit_current_and_run_next();
         }
         Trap::Exception(Exception::IllegalInstruction) => {
