@@ -1,0 +1,12 @@
+diff a/os/Cargo.toml b/os/Cargo.toml	(rejected hunks)
+@@ -9,7 +9,8 @@ edition = "2018"
+ [dependencies]
+ riscv = { git = "https://github.com/rcore-os/riscv", features = ["inline-asm"] }
+ lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
+-
++log = "0.4.19"
++sbi-rt = { version = "0.0.3", features = ["legacy"] }
+ [features]
+ board_qemu = []
+ board_k210 = []
+\ No newline at end of file

@@ -33,6 +33,8 @@ mod lang_items;
 mod loader;
 mod sbi;
 mod sync;
+//mod logging;
+mod stacktrace;
 pub mod syscall;
 pub mod task;
 mod timer;
@@ -57,6 +59,7 @@ fn clear_bss() {
 #[no_mangle]
 pub fn rust_main() -> ! {
     clear_bss();
+    logging::init();
     println!("[kernel] Hello, world!");
     trap::init();
     loader::load_apps();
