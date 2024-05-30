@@ -19,6 +19,7 @@ use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sbi::shutdown;
 use crate::sync::UPSafeCell;
+use crate::timer::{self, get_time_ms};
 use lazy_static::*;
 use switch::__switch;
 use task::{TaskControlBlock, TaskStatus};
@@ -49,6 +50,13 @@ pub struct TaskManagerInner {
     current_task: usize,
 }
 
+/// The user app time statistics
+pub struct UserStateTime {
+    start_time: usize,
+    user_time_ms: usize,
+    total_usr_time: usize
+}
+
 lazy_static! {
     /// Global variable: TASK_MANAGER
     pub static ref TASK_MANAGER: TaskManager = {
@@ -56,6 +64,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            runned_time_ms: 0
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -71,6 +80,14 @@ lazy_static! {
             },
         }
     };
+    /// Global variable: USER_RUNNED_TIME
+    pub static ref USER_RUNNED_TIME: UPSafeCell<UserStateTime> = unsafe {
+        UPSafeCell::new(UserStateTime {
+            start_time: 0,
+            user_time_ms: 0,
+            total_usr_time: 0
+        })
+    }; 
 }
 
 impl TaskManager {
@@ -83,6 +100,11 @@ impl TaskManager {
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
+        let mut user_runned_time = USER_RUNNED_TIME.exclusive_access();
+        user_runned_time.user_time_ms = timer::get_time_ms();
+        user_runned_time.start_time = user_runned_time.user_time_ms;
+
+        drop(user_runned_time);
         drop(inner);
         let mut _unused = TaskContext::zero_init();
         // before this, we should drop local variables that must be dropped manually
@@ -128,7 +150,19 @@ impl TaskManager {
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
+            
+            let mut user_runned_time = USER_RUNNED_TIME.exclusive_access();
+            let cur_time_ms = timer::get_time_ms();
+            let delta_ms = cur_time_ms - user_runned_time.user_time_ms;
+            
+            user_runned_time.user_time_ms = cur_time_ms;
+
+            inner.tasks[current].runned_time_ms += delta_ms;
+            user_runned_time.total_usr_time += delta_ms;
+
+            drop(user_runned_time);
             drop(inner);
+            
             if current != next {
                 log::info!("switch from task: {} to task: {}",current, next);
             }
@@ -139,8 +173,27 @@ impl TaskManager {
             // go back to user mode
         } else {
             println!("All applications completed!");
+            show_task_time_statistics();
+            show_total_user_time();
+            let total_time = get_time_ms() - self.get_start_time();
+            log::info!("Total kernel time was {} ms", total_time - get_total_user_time());
             shutdown(false);
         }
+    }
+
+    fn get_task_running_time(&self, task_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[task_id].runned_time_ms
+    }
+
+    fn get_user_time(&self) -> usize {
+        let user_runned_time = USER_RUNNED_TIME.exclusive_access();
+        user_runned_time.total_usr_time
+    }
+
+    fn get_start_time(&self) -> usize {
+        let user_runned_time = USER_RUNNED_TIME.exclusive_access();
+        user_runned_time.start_time
     }
 }
 
@@ -174,4 +227,22 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// show time statistics of individual task 
+pub fn show_task_time_statistics () {
+    for i in 0..get_num_app(){
+        let time = TASK_MANAGER.get_task_running_time(i);
+        log::info!("Task {} has runned for {} ms", i, time);
+    }
+}
+
+/// get total user time
+pub fn get_total_user_time() -> usize {
+    TASK_MANAGER.get_user_time()
+}
+
+/// show total user time 
+pub fn show_total_user_time() {
+    log::info!("Total user time was {}", TASK_MANAGER.get_user_time());
 }
