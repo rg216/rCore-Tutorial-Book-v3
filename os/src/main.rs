@@ -33,7 +33,7 @@ mod lang_items;
 mod loader;
 mod sbi;
 mod sync;
-//mod logging;
+mod logging;
 mod stacktrace;
 pub mod syscall;
 pub mod task;
