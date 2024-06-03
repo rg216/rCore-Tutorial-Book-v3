@@ -22,7 +22,9 @@ fn main() -> i32 {
             println!("power_3 [{}/{}]", i, iter);
         }
     }
+    let result:f64 = 100.0;
     println!("{}^{} = {}(MOD {})", p, iter, s[cur], m);
+    println!("{}", result);
     println!("Test power_3 OK!");
     0
 }

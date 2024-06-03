@@ -59,3 +59,6 @@ __restore:
     # now sp->kernel stack, sscratch->user stack
     csrrw sp, sscratch, sp
     sret
+
+__fpuinit:
+    ret
