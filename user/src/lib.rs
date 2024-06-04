@@ -2,6 +2,7 @@
 #![feature(linkage)]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
+#[allow(unused)]
 
 #[macro_use]
 pub mod console;

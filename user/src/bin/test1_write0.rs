@@ -1,11 +1,11 @@
 #![no_std]
 #![no_main]
-#![feature(asm)]
 
 #[macro_use]
 extern crate user_lib;
 extern crate core;
 use core::slice;
+use core::arch::asm;
 use user_lib::{write, STDOUT};
 
 /// 正确输出：
