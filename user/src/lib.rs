@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(asm)]
 #![feature(linkage)]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
@@ -15,6 +14,7 @@ extern crate core;
 extern crate bitflags;
 
 use buddy_system_allocator::LockedHeap;
+//use core::arch::asm;
 pub use console::{flush, STDIN, STDOUT};
 pub use syscall::*;
 

@@ -21,7 +21,7 @@ use crate::task::{
 };
 use crate::timer::set_next_trigger;
 use crate::config::{TRAP_CONTEXT, TRAMPOLINE};
-
+use core::arch::{global_asm, asm};
 global_asm!(include_str!("trap.S"));
 
 pub fn init() {
@@ -68,6 +68,10 @@ pub fn trap_handler() -> ! {
             set_next_trigger();
             suspend_current_and_run_next();
         }
+        Trap::Exception(Exception::LoadPageFault) => {
+            println!("[kernel] LoadPageFault in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.", stval, cx.sepc);
+            exit_current_and_run_next();
+        }
         _ => {
             panic!("Unsupported trap {:?}, stval = {:#x}!", scause.cause(), stval);
         }
@@ -94,7 +98,7 @@ pub fn trap_return() -> ! {
             in("a1") user_satp,
             options(noreturn)
         );
-    }
+    };
 }
 
 #[no_mangle]

@@ -15,6 +15,8 @@ use crate::config::{
     TRAP_CONTEXT,
     USER_STACK_SIZE
 };
+use core::arch::asm;
+use core::borrow::BorrowMut;
 
 extern "C" {
     fn stext();
@@ -188,6 +190,11 @@ impl MemorySet {
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
     }
+    
+    #[allow(unused)]
+    pub fn get_page_table(&mut self) -> &mut PageTable {
+    self.page_table.borrow_mut()
+    }
 }
 
 pub struct MapArea {
@@ -308,3 +315,4 @@ pub fn remap_test() {
     );
     println!("remap_test passed!");
 }
+
