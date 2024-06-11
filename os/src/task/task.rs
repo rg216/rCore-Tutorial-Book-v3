@@ -1,59 +1,90 @@
 use crate::mm::{MemorySet, PhysPageNum, KERNEL_SPACE, VirtAddr};
 use crate::trap::{TrapContext, trap_handler};
-use crate::config::TRAP_CONTEXT;
+use crate::config::{TRAP_CONTEXT, MAX_SYSCALL_NUM};
 use crate::sync::UPSafeCell;
 use core::cell::RefMut;
 use super::TaskContext;
 use super::{PidHandle, pid_alloc, KernelStack};
 use alloc::sync::{Weak, Arc};
 use alloc::vec::Vec;
+use crate::timer::get_time;
 
 pub struct TaskControlBlock {
     // immutable
     pub pid: PidHandle,
     pub kernel_stack: KernelStack,
     // mutable
-    inner: UPSafeCell<TaskControlBlockInner>,
+    pub inner: UPSafeCell<TaskControlBlockInner>,
 }
 
+impl TaskControlBlock {
+    /// Get the mutable reference of the inner TCB
+    pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
+        self.inner.exclusive_access()
+    }
+    /// Get the address of app's page table
+    pub fn get_user_token(&self) -> usize {
+        let inner = self.inner_exclusive_access();
+        inner.memory_set.token()
+    }
+}
 pub struct TaskControlBlockInner {
-    pub trap_cx_ppn: PhysPageNum,
+    pub task_status: TaskStatus, // Maintain the execution status of the current process
+    pub task_cx: TaskContext, // Save task context
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+    pub user_time: usize,
+    pub kernel_time: usize,
+    pub checkpoint: usize, // record time point
+
+    pub memory_set: MemorySet, // Application address space
+    pub trap_cx_ppn: PhysPageNum, // The physical page number of the frame where the trap context is placed
+    /// Application data can only appear in areas
+    /// where the application address space is lower than base_size
     pub base_size: usize,
-    pub task_cx: TaskContext,
-    pub task_status: TaskStatus,
-    pub memory_set: MemorySet,
+    pub heap_bottom: usize, // Heap bottom
+    pub program_brk: usize, // Program break
+
+    // Parent process of the current process.
+    // Weak will not affect the reference count of the parent
     pub parent: Option<Weak<TaskControlBlock>>,
-    pub children: Vec<Arc<TaskControlBlock>>,
-    pub exit_code: i32,
+    pub children: Vec<Arc<TaskControlBlock>>, // A vector containing TCBs of all child processes of the current process
+    pub exit_code: i32, // It is set when active exit or execution error occurs
+
+    pub stride: u64,
+    pub priority: u64,
 }
 
 impl TaskControlBlockInner {
-    /*
-    pub fn get_task_cx_ptr2(&self) -> *const usize {
-        &self.task_cx_ptr as *const usize
-    }
-    */
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
         self.trap_cx_ppn.get_mut()
     }
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
-    fn get_status(&self) -> TaskStatus {
+    pub fn get_status(&self) -> TaskStatus {
         self.task_status
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
     }
+    /// update checkpoint and return the diff time
+    pub fn update_checkpoint(&mut self) -> usize {
+        let prev_point = self.checkpoint;
+        self.checkpoint = get_time();
+        return self.checkpoint - prev_point;
+    }
+    pub fn set_priority(&mut self, level: u64) {
+        self.priority = level;
+    }
 }
 
 impl TaskControlBlock {
-    pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
-        self.inner.exclusive_access()
-    }
+    /// Create a new process
+    /// At present, it is only used for the creation of 'initproc'
     pub fn new(elf_data: &[u8]) -> Self {
         // memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        // Check which PPN the TRAP_CONTEXT locates at
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT).into())
             .unwrap()
@@ -66,16 +97,26 @@ impl TaskControlBlock {
         let task_control_block = Self {
             pid: pid_handle,
             kernel_stack,
-            inner: unsafe { UPSafeCell::new(TaskControlBlockInner {
-                trap_cx_ppn,
-                base_size: user_sp,
-                task_cx: TaskContext::goto_trap_return(kernel_stack_top),
-                task_status: TaskStatus::Ready,
-                memory_set,
-                parent: None,
-                children: Vec::new(),
-                exit_code: 0,
-            })},
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    task_status: TaskStatus::Ready,
+                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    user_time: 0,
+                    kernel_time: 0,
+                    checkpoint: 0,
+                    memory_set,
+                    trap_cx_ppn,
+                    base_size: user_sp,
+                    heap_bottom: user_sp,
+                    program_brk: user_sp,
+                    parent: None,
+                    children: Vec::new(),
+                    exit_code: 0,
+                    stride: 0,
+                    priority: 16,
+                })
+            },
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
@@ -88,6 +129,8 @@ impl TaskControlBlock {
         );
         task_control_block
     }
+
+    /// Load a new elf to replace the original application address space and start execution
     pub fn exec(&self, elf_data: &[u8]) {
         // memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
@@ -96,12 +139,14 @@ impl TaskControlBlock {
             .unwrap()
             .ppn();
 
-        // **** access inner exclusively
+        // **** access current TCB exclusively
         let mut inner = self.inner_exclusive_access();
         // substitute memory_set
         inner.memory_set = memory_set;
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
+        // initialize base_size
+        inner.base_size = user_sp;
         // initialize trap_cx
         let trap_cx = inner.get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
@@ -113,13 +158,13 @@ impl TaskControlBlock {
         );
         // **** release inner automatically
     }
-    pub fn fork(self: &Arc<TaskControlBlock>) -> Arc<TaskControlBlock> {
+
+    /// parent process fork the child process
+    pub fn fork(self: &Arc<Self>) -> Arc<Self> {
         // ---- access parent PCB exclusively
         let mut parent_inner = self.inner_exclusive_access();
         // copy user space(include trap context)
-        let memory_set = MemorySet::from_existed_user(
-            &parent_inner.memory_set
-        );
+        let memory_set = MemorySet::from_existed_user(&parent_inner.memory_set);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT).into())
             .unwrap()
@@ -131,30 +176,69 @@ impl TaskControlBlock {
         let task_control_block = Arc::new(TaskControlBlock {
             pid: pid_handle,
             kernel_stack,
-            inner: unsafe { UPSafeCell::new(TaskControlBlockInner {
-                trap_cx_ppn,
-                base_size: parent_inner.base_size,
-                task_cx: TaskContext::goto_trap_return(kernel_stack_top),
-                task_status: TaskStatus::Ready,
-                memory_set,
-                parent: Some(Arc::downgrade(self)),
-                children: Vec::new(),
-                exit_code: 0,
-            })},
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    task_status: TaskStatus::Ready,
+                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    user_time: 0,
+                    kernel_time: 0,
+                    checkpoint: get_time(), // give the new process a new start point
+                    memory_set,
+                    trap_cx_ppn,
+                    base_size: parent_inner.base_size,
+                    heap_bottom: parent_inner.heap_bottom,
+                    program_brk: parent_inner.program_brk,
+                    parent: Some(Arc::downgrade(self)),
+                    children: Vec::new(),
+                    exit_code: 0,
+                    stride: 0,
+                    priority: 16,
+                })
+            },
         });
         // add child
         parent_inner.children.push(task_control_block.clone());
         // modify kernel_sp in trap_cx
-        // **** access children PCB exclusively
+        // **** access child PCB exclusively
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         trap_cx.kernel_sp = kernel_stack_top;
         // return
         task_control_block
-        // ---- release parent PCB automatically
-        // **** release children PCB automatically
+        // ---- stop exclusively accessing parent/children PCB automatically
+        // **** release child PCB
+        // ---- release parent PCB
     }
+
+    /// get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+
+    /// change the location of the program break. return None if failed.
+    pub fn change_program_brk(&self, size: i32) -> Option<usize> {
+        let mut inner = self.inner_exclusive_access();
+        let heap_bottom = inner.heap_bottom;
+        let old_break = inner.program_brk;
+        let new_brk = inner.program_brk as isize + size as isize;
+        if new_brk < heap_bottom as isize {
+            return None;
+        }
+        let result = if size < 0 {
+            inner
+                .memory_set
+                .shrink_to(VirtAddr(heap_bottom), VirtAddr(new_brk as usize))
+        } else {
+            inner
+                .memory_set
+                .append_to(VirtAddr(heap_bottom), VirtAddr(new_brk as usize))
+        };
+        if result {
+            inner.program_brk = new_brk as usize;
+            Some(old_break)
+        } else {
+            None
+        }
     }
 }
 

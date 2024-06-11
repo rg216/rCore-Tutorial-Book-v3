@@ -1,6 +1,6 @@
 mod context;
 mod switch;
-mod task;
+pub mod task;
 mod manager;
 mod processor;
 mod pid;
@@ -11,6 +11,7 @@ use task::{TaskControlBlock, TaskStatus};
 use alloc::sync::Arc;
 use manager::fetch_task;
 use lazy_static::*;
+use crate::mm::{VirtAddr, VirtPageNum, address::VPNRange ,MapPermission, PageTableEntry};
 
 pub use context::TaskContext;
 pub use processor::{
@@ -83,4 +84,37 @@ lazy_static! {
 
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+pub fn get_current_task_page_table(vpn: VirtPageNum) -> Option<PageTableEntry> {
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    task_inner.memory_set.translate(vpn)
+}
+
+pub fn create_new_map_area(start_va: VirtAddr, end_va: VirtAddr, perm: MapPermission) {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.memory_set.insert_framed_area(start_va, end_va, perm);
+}
+
+
+pub fn unmap_consecutive_area(start: usize, len: usize) -> isize {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    let start_vpn = VirtAddr::from(start).floor();
+    let end_vpn = VirtAddr::from(start + len).ceil();
+    let vpns = VPNRange::new(start_vpn, end_vpn);
+    for vpn in vpns {
+        if let Some(pte) = task_inner.memory_set.translate(vpn) {
+            if !pte.is_valid() {
+                return -1;
+            }
+            task_inner.memory_set.get_page_table().unmap(vpn);
+        } else {
+            // Also unmapped if no PTE found
+            return -1;
+        }
+    }
+    0
 }

@@ -1,8 +1,8 @@
-mod heap_allocator;
-mod address;
-mod frame_allocator;
-mod page_table;
-mod memory_set;
+pub mod heap_allocator;
+pub mod address;
+pub mod frame_allocator;
+pub mod page_table;
+pub mod memory_set;
 
 use page_table::{PageTable, PTEFlags};
 use address::{VPNRange, StepByOne};
