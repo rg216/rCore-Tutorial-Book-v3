@@ -36,6 +36,9 @@
 <a href="#34" id="34">34</a>
 <a href="#35" id="35">35</a>
 <a href="#36" id="36">36</a>
+<a href="#37" id="37">37</a>
+<a href="#38" id="38">38</a>
+<a href="#39" id="39">39</a>
 </pre></div><pre class="rust"><code><span class="doccomment">//! Implementation of [`TaskContext`]
 
 /// Task Context
@@ -48,6 +51,7 @@
     </span>sp: usize,
     <span class="doccomment">/// callee saved registers:  s 0..11
     </span>s: [usize; <span class="number">12</span>],
+    f: [f64; <span class="number">32</span>],
 }
 
 <span class="kw">impl </span>TaskContext {
@@ -57,6 +61,7 @@
             ra: <span class="number">0</span>,
             sp: <span class="number">0</span>,
             s: [<span class="number">0</span>; <span class="number">12</span>],
+            f: [<span class="number">0.0</span>; <span class="number">32</span>],
         }
     }
 
@@ -69,6 +74,7 @@
             ra: __restore <span class="kw">as </span>usize,
             sp: kstack_ptr,
             s: [<span class="number">0</span>; <span class="number">12</span>],
+            f: [<span class="number">0.0</span>; <span class="number">32</span>],
         }
     }
 }
