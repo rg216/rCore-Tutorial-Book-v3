@@ -13,7 +13,7 @@
 //!
 //! We then call [`batch::run_next_app()`] and for the first time go to
 //! userspace.
-
+#![feature(strict_provenance)]
 #![deny(missing_docs)]
 #![deny(warnings)]
 #![no_std]

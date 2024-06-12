@@ -190,8 +190,15 @@ pub fn time_elapse() {
 }
 
 ///Check sys_write addr. If not legal, return false. Vice versa;
-pub fn sys_write_check(buf: *const u8, len: usize) -> bool {
-    let res = (buf as usize >= APP_BASE_ADDRESS && len <= APP_SIZE_LIMIT)
-        || (buf as usize >= USER_STACK.data.as_ptr() as usize && len <= USER_STACK_SIZE);
-    res
+pub fn sys_write_check(slice: &[u8]) -> Option<isize> {
+    let app_start = slice.as_ptr().addr();
+    let app_size = slice.len();
+    if !((app_start >= APP_BASE_ADDRESS &&
+        app_start + app_size <= APP_BASE_ADDRESS + APP_SIZE_LIMIT) ||
+        (app_start + app_size <= USER_STACK.get_sp()  &&
+        app_start >=  USER_STACK.get_sp() - USER_STACK_SIZE  )) {
+        None
+    } else {
+        Some(app_size as isize)
+    }
 }
